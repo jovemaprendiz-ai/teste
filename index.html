@@ -544,13 +544,13 @@
 
 <div class="toast" id="toast"></div>
 
-<script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular do ze","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188539090,"nome":"coisas erradas","descricao":"lula ladrao roubou meu coracao","preco":13,"estoque":11,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188562412,"nome":"pc da chicoski","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":""}],"publicadoEm":"2026-09-23T18:36:01.857Z"}</script>
+<script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188539090,"nome":"coisas erradas","descricao":"lula ladrao roubou meu coracao","preco":13,"estoque":11,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188562412,"nome":"pc da chicoski","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":""}],"publicadoEm":"2026-09-23T18:46:27.702Z"}</script>
 
 <script>
 /* Retrato da página exatamente como ela foi publicada, tirado ANTES de
    qualquer renderização. É esta cópia limpa que republicamos quando o
    catálogo muda — nunca a página já mexida na tela. */
-const PAGINA_PUBLICADA = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+const PAGINA_PUBLICADA = '<!' + 'DOCTYPE html>' + '\n' + document.documentElement.outerHTML;
 /* ==================== CONFIG ==================== */
 const SENHA_ADMIN = "admin123";
 const CHAVE_PIX = "123.123.123-70";
@@ -836,19 +836,27 @@ async function conectarPublicador(){
 }
 
 /* A plataforma embrulha a página num cabeçalho próprio. Se republicássemos
-   o embrulho junto, ele se empilharia a cada salvamento — então cortamos
-   fora tudo que está antes do nosso <!DOCTYPE html> e depois do </html>. */
+   o embrulho junto, ele se empilharia a cada salvamento, então cortamos fora
+   o que vem antes da abertura e depois do fechamento do nosso documento.
+   As marcas são montadas em pedaços de propósito: escritas por extenso, elas
+   apareceriam aqui no código e o corte aconteceria no lugar errado. */
+const MARCA_ABRE = '<!' + 'DOCTYPE html>';
+const MARCA_FECHA = '<' + '/html>';
+
 function limparEnvelope(texto){
-  const inicio = texto.indexOf('<!DOCTYPE html>');
+  const inicio = texto.indexOf(MARCA_ABRE);
   if(inicio < 0) return texto;
-  const fim = texto.indexOf('<\/html>', inicio);
-  return fim < 0 ? texto.slice(inicio) : texto.slice(inicio, fim + 7);
+  const fim = texto.indexOf(MARCA_FECHA, inicio);
+  return fim < 0 ? texto.slice(inicio) : texto.slice(inicio, fim + MARCA_FECHA.length);
 }
 
 function montarPaginaComCatalogo(){
   const marcador = /<script[^>]*id="dadosLoja"[^>]*>[\s\S]*?<\/script>/;
   const fonte = limparEnvelope(fontePagina);
   if(!marcador.test(fonte)) return null;
+  /* Confere que a fonte continua inteira: um corte errado já deixou a loja
+     publicada pela metade uma vez, e isso não pode voltar a acontecer. */
+  if(fonte.length < 30000 || fonte.indexOf('iniciar();') < 0) return null;
   const json = JSON.stringify({produtos, publicadoEm:new Date().toISOString()}).replace(/</g, '\\u003c');
   return fonte.replace(marcador,
     () => '<script type="application/json" id="dadosLoja">' + json + '<\/script>');
@@ -864,7 +872,7 @@ async function publicarCatalogo(){
   try{
     const html = montarPaginaComCatalogo();
     if(!html){
-      mostrarToast('Não achei onde gravar o catálogo nesta página.');
+      mostrarToast('A página não pôde ser montada por inteiro. Nada foi publicado.');
       return;
     }
     if(html.length > LIMITE_PAGINA){
