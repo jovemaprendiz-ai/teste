@@ -21,5 +21,5 @@
 
 window.LOJA_CONFIG = {
   supabaseUrl: 'https://blaypwcojloqgrucfrfj.supabase.co',
-  supabaseAnonKey: ''
+  supabaseAnonKey: 'sb_publishable_iFGXJcEYNCiVErmqtFP9Zw_Vi_cKf8r'
 };
