@@ -1283,7 +1283,21 @@ async function entrarComoAdmin(){
   }
   const { error } = await bd.auth.signInWithPassword({email, password: senha});
   if(error){
-    mostrarErro('erroAdmin', 'E-mail ou senha incorretos.');
+    /* Cada falha tem uma causa diferente; dizer "senha errada" para todas
+       manda a pessoa procurar no lugar errado. */
+    const msg = (error.message || '');
+    if(/email not confirmed/i.test(msg)){
+      mostrarErro('erroAdmin', 'Esta conta ainda n\u00e3o foi confirmada. No Supabase, em Authentication > Users, confirme o usu\u00e1rio.');
+    }else if(/invalid login credentials/i.test(msg)){
+      mostrarErro('erroAdmin', 'E-mail ou senha incorretos.');
+    }else if(/invalid api key|jwt|apikey/i.test(msg)){
+      mostrarErro('erroAdmin', 'O servidor n\u00e3o aceitou a chave desta loja. Avise quem cuida do site.');
+    }else if(/failed to fetch|networkerror/i.test(msg)){
+      mostrarErro('erroAdmin', 'Sem conex\u00e3o com o servidor. Verifique a internet e tente de novo.');
+    }else{
+      mostrarErro('erroAdmin', 'N\u00e3o consegui entrar: ' + msg);
+    }
+    console.warn('[login]', error);
     return;
   }
   if(!await confirmarSeEhAdmin()){
