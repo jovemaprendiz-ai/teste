@@ -779,6 +779,41 @@ async function buscarFonteDaPagina(){
   }catch(e){ console.warn('[publicacao] usando o retrato do DOM', e); }
 }
 
+/* A mesma página roda em dois lugares: dentro da Claude (onde ela se
+   republica sozinha) e num site comum, tipo GitHub Pages (onde o catálogo
+   vem do arquivo catalogo.json, ao lado do index.html). */
+function estaNaClaude(){
+  return typeof window.claude !== 'undefined' && !!window.claude.use;
+}
+
+async function carregarCatalogoDoArquivo(){
+  if(estaNaClaude()) return;
+  try{
+    const resposta = await fetch('catalogo.json', {cache:'no-store'});
+    if(!resposta.ok) return;
+    const dados = await resposta.json();
+    if(Array.isArray(dados.produtos) && dados.produtos.length){
+      produtos = dados.produtos;
+      salvar('lv_produtos', produtos);
+      renderizarLoja();
+      renderizarSubAbaAdmin();
+    }
+  }catch(e){ console.warn('[catálogo] sem catalogo.json, usando o embutido', e); }
+}
+
+function exportarCatalogo(){
+  const json = JSON.stringify({produtos, atualizadoEm:new Date().toISOString()}, null, 2);
+  const url = URL.createObjectURL(new Blob([json], {type:'application/json'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'catalogo.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  mostrarToast('catalogo.json baixado! Substitua o arquivo no GitHub.');
+}
+
 async function conectarPublicador(){
   if(typeof window.claude !== 'undefined' && window.claude.use){
     try{ publicadorPagina = await window.claude.use('artifact'); }
@@ -791,6 +826,9 @@ async function conectarPublicador(){
   if(publicadorPagina){
     selo.textContent = '🌐 catálogo público';
     selo.className = 'selo-catalogo ok';
+  }else if(!estaNaClaude()){
+    selo.textContent = '💾 dados neste navegador';
+    selo.className = 'selo-catalogo off';
   }else{
     selo.textContent = '💾 só neste navegador';
     selo.className = 'selo-catalogo off';
@@ -1532,7 +1570,15 @@ function renderizarSubAbaAdmin(){
   if(!cont) return; // aba de administração ainda não está aberta
   if(abaAdminAtiva === 'produtos'){
     cont.innerHTML = `
-      <div style="margin-bottom:14px;text-align:right;">
+      ${!estaNaClaude() ? `
+      <div style="background:#fff4e0;color:#8a6400;padding:11px 14px;border-radius:8px;
+                  font-size:13px;margin-bottom:14px;line-height:1.5;">
+        Neste site as alterações ficam só neste navegador. Para o catálogo mudar
+        para todo mundo, clique em <b>Baixar catalogo.json</b> e substitua o arquivo
+        de mesmo nome no GitHub.
+      </div>` : ''}
+      <div style="margin-bottom:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+        ${!estaNaClaude() ? `<button class="btn btn-secundario" onclick="exportarCatalogo()">📥 Baixar catalogo.json</button>` : ''}
         <button class="btn btn-primario" onclick="abrirModalNovoProduto()">+ Novo produto</button>
       </div>
       <div class="tabela-wrap">
@@ -1740,6 +1786,7 @@ function iniciar(){
   atualizarBadgeCarrinho();
   conectarArmazemFotos();
   conectarPublicador();
+  carregarCatalogoDoArquivo();
 }
 iniciar();
 </script>
