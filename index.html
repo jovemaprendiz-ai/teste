@@ -586,6 +586,8 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="config.js"></script>
+
 <script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]},{"id":1790188539090,"nome":"coisas","descricao":"","preco":13,"estoque":22,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]},{"id":1790188562412,"nome":"PC","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]}],"catalogos":[],"publicadoEm":"2026-09-23T18:52:04.169Z"}</script>
 
 <script>
@@ -843,7 +845,7 @@ function estaNaClaude(){
 }
 
 async function carregarCatalogoDoArquivo(){
-  if(estaNaClaude()) return;
+  if(estaNaClaude() || configuracaoBanco()) return;
   try{
     const resposta = await fetch('catalogo.json', {cache:'no-store'});
     if(!resposta.ok) return;
@@ -923,6 +925,9 @@ function montarPaginaComCatalogo(){
 }
 
 async function publicarCatalogo(){
+  /* Com o banco ligado, o catálogo vive no servidor: republicar a página
+     deixa de fazer sentido e só criaria uma segunda verdade. */
+  if(bancoAtivo) return;
   if(!publicadorPagina){
     mostrarToast('Produto salvo só neste navegador (não consegui publicar).');
     return;
@@ -1027,6 +1032,14 @@ function blobParaDataUrl(blob){
 
 /* Devolve {imagem, imagemId} para gravar no produto */
 async function guardarImagem(blob){
+  if(bancoAtivo){
+    try{
+      return {imagem: await enviarFotoParaBanco(blob), imagemId: ''};
+    }catch(e){
+      avisarErroBanco(e, 'enviar foto');
+      return null;
+    }
+  }
   if(armazemFotos){
     try{
       const envio = await armazemFotos.upload(blob, {type:'image/jpeg'});
@@ -1118,6 +1131,213 @@ function prepararCamposFoto(produto){
   trocarPreviewFoto(produto ? fonteImagem(produto) : '', false);
 }
 
+
+/* ==================== BANCO DE DADOS (Supabase) ====================
+   Com o banco configurado, ele passa a ser a fonte da verdade: produtos,
+   catálogos e pedidos moram no servidor. Quem pode alterar é decidido lá,
+   por regras do próprio banco — o navegador só pede, não manda. Sem
+   configuração, a loja segue funcionando do jeito antigo. */
+let bd = null;
+let bancoAtivo = false;
+
+function configuracaoBanco(){
+  const c = window.LOJA_CONFIG || {};
+  return (c.supabaseUrl && c.supabaseAnonKey) ? c : null;
+}
+
+function avisarErroBanco(erro, acao){
+  console.warn('[banco]', acao || '', erro);
+  const msg = (erro && (erro.message || erro.error_description)) || '';
+  if(/row-level security|permission|not authorized|JWT/i.test(msg)){
+    mostrarToast('Sua conta não tem permissão para essa alteração.');
+  }else{
+    mostrarToast('Não consegui falar com o servidor. Tente de novo.');
+  }
+}
+
+/* ---- conversão entre o formato da tela e o das tabelas ---- */
+function produtoDoBanco(r){
+  return {
+    id: Number(r.id), nome: r.nome, descricao: r.descricao || '',
+    preco: Number(r.preco), estoque: Number(r.estoque), emoji: r.emoji || '📦',
+    imagem: r.imagem_url || '', imagemId: '',
+    catalogos: Array.isArray(r.catalogos) ? r.catalogos.map(Number) : []
+  };
+}
+function produtoParaBanco(p){
+  return {
+    id: p.id, nome: p.nome, descricao: p.descricao || '',
+    preco: p.preco, estoque: p.estoque, emoji: p.emoji || '📦',
+    imagem_url: p.imagem || '', catalogos: catalogosDoProduto(p).map(Number),
+    atualizado_em: new Date().toISOString()
+  };
+}
+function pedidoDoBanco(r){
+  return {
+    id: Number(r.id), numero: r.numero, data: r.criado_em,
+    clienteNome: r.cliente_nome, clienteEmail: r.cliente_email,
+    clienteCep: r.cliente_cep || '', tipoRecebimento: r.tipo_recebimento,
+    clienteContaId: null, metodoPagamento: r.metodo_pagamento,
+    itens: Array.isArray(r.itens) ? r.itens : [],
+    total: Number(r.total), status: r.status
+  };
+}
+function pedidoParaBanco(ped){
+  return {
+    id: ped.id, numero: ped.numero, criado_em: ped.data,
+    cliente_nome: ped.clienteNome, cliente_email: ped.clienteEmail,
+    cliente_cep: ped.clienteCep || '', tipo_recebimento: ped.tipoRecebimento,
+    metodo_pagamento: ped.metodoPagamento, itens: ped.itens,
+    total: ped.total, status: ped.status
+  };
+}
+
+/* ---- leitura ---- */
+async function carregarDoBanco(){
+  if(!bancoAtivo) return;
+  try{
+    const [rc, rp] = await Promise.all([
+      bd.from('catalogos').select('*').order('nome'),
+      bd.from('produtos').select('*').order('nome')
+    ]);
+    if(rc.error) avisarErroBanco(rc.error, 'ler catálogos');
+    else if(rc.data){
+      catalogos = rc.data.map(c => ({id: Number(c.id), nome: c.nome}));
+      salvar('lv_catalogos', catalogos);
+    }
+    if(rp.error) avisarErroBanco(rp.error, 'ler produtos');
+    else if(rp.data){
+      produtos = rp.data.map(produtoDoBanco);
+      salvar('lv_produtos', produtos);
+    }
+  }catch(e){ avisarErroBanco(e, 'leitura'); }
+}
+
+async function carregarPedidosDoBanco(){
+  if(!bancoAtivo || !adminLogado) return;
+  try{
+    const { data, error } = await bd.from('pedidos')
+      .select('*').order('criado_em', {ascending:false}).limit(500);
+    if(error){ avisarErroBanco(error, 'ler pedidos'); return; }
+    pedidos = (data || []).map(pedidoDoBanco);
+    salvar('lv_pedidos', pedidos);
+  }catch(e){ avisarErroBanco(e, 'ler pedidos'); }
+}
+
+/* ---- escrita ---- */
+async function bdSalvarProduto(p){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('produtos').upsert(produtoParaBanco(p));
+  if(error) avisarErroBanco(error, 'salvar produto');
+}
+async function bdExcluirProduto(id){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('produtos').delete().eq('id', id);
+  if(error) avisarErroBanco(error, 'excluir produto');
+}
+async function bdSalvarCatalogo(c){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('catalogos').upsert({id: c.id, nome: c.nome});
+  if(error) avisarErroBanco(error, 'salvar catálogo');
+}
+async function bdExcluirCatalogo(id, produtosAfetados){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('catalogos').delete().eq('id', id);
+  if(error){ avisarErroBanco(error, 'excluir catálogo'); return; }
+  for(const p of produtosAfetados){ await bdSalvarProduto(p); }
+}
+async function bdSalvarPedido(ped){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('pedidos').upsert(pedidoParaBanco(ped));
+  if(error) avisarErroBanco(error, 'salvar pedido');
+}
+async function bdExcluirPedido(id){
+  if(!bancoAtivo) return;
+  const { error } = await bd.from('pedidos').delete().eq('id', id);
+  if(error) avisarErroBanco(error, 'excluir pedido');
+}
+async function enviarFotoParaBanco(blob){
+  const nome = 'produto-' + Date.now() + '-' + Math.floor(Math.random()*10000) + '.jpg';
+  const { error } = await bd.storage.from('fotos')
+    .upload(nome, blob, {contentType: 'image/jpeg', upsert: false});
+  if(error) throw error;
+  const { data } = bd.storage.from('fotos').getPublicUrl(nome);
+  return data.publicUrl;
+}
+
+/* ---- entrar e sair da administração ---- */
+async function confirmarSeEhAdmin(){
+  try{
+    const { data, error } = await bd.from('admins').select('user_id').limit(1);
+    if(error) return false;
+    return !!(data && data.length);
+  }catch(e){ return false; }
+}
+
+async function entrarComoAdmin(){
+  const email = document.getElementById('adminEmail').value.trim();
+  const senha = document.getElementById('adminSenha').value;
+  if(!email || !senha){
+    mostrarErro('erroAdmin', 'Preencha e-mail e senha.');
+    return;
+  }
+  const { error } = await bd.auth.signInWithPassword({email, password: senha});
+  if(error){
+    mostrarErro('erroAdmin', 'E-mail ou senha incorretos.');
+    return;
+  }
+  if(!await confirmarSeEhAdmin()){
+    await bd.auth.signOut();
+    mostrarErro('erroAdmin', 'Esta conta existe, mas não é administradora da loja.');
+    return;
+  }
+  adminLogado = true;
+  salvar('lv_sessao_admin', true);
+  abaAdminAtiva = 'produtos';
+  await carregarPedidosDoBanco();
+  renderizarAdmin();
+  renderizarPedidos();
+  mostrarToast('Bem-vindo(a) à administração! 🔐');
+}
+
+async function conectarBanco(){
+  const cfg = configuracaoBanco();
+  if(!cfg) return;
+  /* Com banco configurado, ser administrador depende da sessão do servidor,
+     nunca do que estiver guardado neste navegador. */
+  adminLogado = false;
+  salvar('lv_sessao_admin', false);
+  try{
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+    bd = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    bancoAtivo = true;
+  }catch(e){
+    console.warn('[banco] não consegui carregar a biblioteca', e);
+    return;
+  }
+  try{
+    const { data } = await bd.auth.getSession();
+    if(data && data.session && await confirmarSeEhAdmin()){
+      adminLogado = true;
+      salvar('lv_sessao_admin', true);
+    }
+  }catch(e){ console.warn('[banco] sessão', e); }
+  await carregarDoBanco();
+  if(adminLogado) await carregarPedidosDoBanco();
+  atualizarSeloBanco();
+  atualizarTelas();
+  renderizarAdmin();
+}
+
+function atualizarSeloBanco(){
+  if(!bancoAtivo) return;
+  const selo = document.getElementById('seloCatalogo');
+  if(!selo) return;
+  selo.style.display = 'inline-block';
+  selo.textContent = '🔒 servidor conectado';
+  selo.className = 'selo-catalogo ok';
+}
+
 /* ==================== CATÁLOGOS ====================
    Um catálogo é uma seção da loja. O produto guarda os ids dos catálogos
    em que aparece, então um produto pode estar em mais de um. */
@@ -1165,16 +1385,19 @@ function salvarCatalogo(){
     mostrarErro('erroCatalogo', 'Já existe um catálogo com esse nome.');
     return;
   }
+  let catalogoSalvo;
   if(id){
-    const c = catalogos.find(c => String(c.id) === String(id));
-    if(!c) return;
-    c.nome = nome;
+    catalogoSalvo = catalogos.find(c => String(c.id) === String(id));
+    if(!catalogoSalvo) return;
+    catalogoSalvo.nome = nome;
     mostrarToast('Catálogo renomeado!');
   }else{
-    catalogos.push({id: gerarId(), nome});
+    catalogoSalvo = {id: gerarId(), nome};
+    catalogos.push(catalogoSalvo);
     mostrarToast('Catálogo criado!');
   }
   salvar('lv_catalogos', catalogos);
+  bdSalvarCatalogo(catalogoSalvo);
   fecharModal('overlayCatalogo');
   atualizarTelas();
   publicarCatalogo();
@@ -1191,11 +1414,14 @@ function excluirCatalogo(id){
       : 'Nenhum produto usa esse catálogo.'),
     function(){
       catalogos = catalogos.filter(c => String(c.id) !== String(id));
+      const afetados = [];
       produtos.forEach(p => {
-        if(Array.isArray(p.catalogos)){
+        if(Array.isArray(p.catalogos) && p.catalogos.some(x => String(x) === String(id))){
           p.catalogos = p.catalogos.filter(x => String(x) !== String(id));
+          afetados.push(p);
         }
       });
+      bdExcluirCatalogo(id, afetados);
       if(String(catalogoAtivo) === String(id)) catalogoAtivo = 'todos';
       salvar('lv_catalogos', catalogos);
       salvar('lv_produtos', produtos);
@@ -1508,6 +1734,11 @@ function confirmarPagamento(){
   };
   pedidos.push(novoPedido);
   salvar('lv_pedidos', pedidos);
+  bdSalvarPedido(novoPedido);
+  itensPedido.forEach(i => {
+    const p = produtos.find(pr => pr.id === i.produtoId);
+    if(p) bdSalvarProduto(p);
+  });
 
   // limpa carrinho
   carrinho = [];
@@ -1650,6 +1881,7 @@ function confirmarPagamentoAdmin(pedId){
     function(){
       ped.status = 'Pago';
       salvar('lv_pedidos', pedidos);
+      bdSalvarPedido(ped);
       atualizarTelas();
       mostrarToast(`Pagamento do pedido ${ped.numero} confirmado! ✅`);
     },
@@ -1673,6 +1905,11 @@ function cancelarPedido(pedId){
 
       ped.status = 'Cancelado';
       salvar('lv_pedidos', pedidos);
+      bdSalvarPedido(ped);
+      ped.itens.forEach(item => {
+        const p = produtos.find(pr => pr.id === item.produtoId);
+        if(p) bdSalvarProduto(p);
+      });
 
       registrarHistorico(ped, 'Cancelado');
 
@@ -1703,6 +1940,7 @@ function excluirPedido(pedId){
 
       pedidos = pedidos.filter(p => p.id !== pedId);
       salvar('lv_pedidos', pedidos);
+      bdExcluirPedido(pedId);
 
       atualizarTelas();
       mostrarToast(`Pedido ${ped.numero} excluído.`);
@@ -1759,6 +1997,30 @@ function rotuloMetodo(m){
 function renderizarAdmin(){
   const cont = document.getElementById('adminConteudo');
   if(!adminLogado){
+    if(bancoAtivo){
+      /* Com banco, quem confere a senha é o servidor: ela nunca passa por aqui
+         e não existe em lugar nenhum do código desta página. */
+      cont.innerHTML = `
+        <div class="login-box">
+          <div class="icone">🔐</div>
+          <h2>Área restrita</h2>
+          <div class="sub">Entre com a conta de administrador da loja</div>
+          <div class="erro-msg" id="erroAdmin"></div>
+          <div class="campo" style="text-align:left;">
+            <label>E-mail</label>
+            <input type="email" id="adminEmail" placeholder="seu@email.com"
+              onkeydown="if(event.key==='Enter') entrarComoAdmin()">
+          </div>
+          <div class="campo" style="text-align:left;">
+            <label>Senha</label>
+            <input type="password" id="adminSenha" placeholder="Sua senha"
+              onkeydown="if(event.key==='Enter') entrarComoAdmin()">
+          </div>
+          <button class="btn btn-primario btn-full" onclick="entrarComoAdmin()">Entrar</button>
+        </div>
+      `;
+      return;
+    }
     cont.innerHTML = `
       <div class="login-box">
         <div class="icone">🔐</div>
@@ -1770,6 +2032,12 @@ function renderizarAdmin(){
           <input type="password" id="senhaAdminInput" placeholder="Senha de administrador" onkeydown="if(event.key==='Enter') loginAdmin()">
         </div>
         <button class="btn btn-primario btn-full" onclick="loginAdmin()">Entrar</button>
+        <div style="margin-top:14px;background:#fff4e0;color:#8a6400;padding:10px 12px;
+                    border-radius:8px;font-size:12.5px;line-height:1.5;text-align:left;">
+          <b>Modo demonstração.</b> Esta senha está escrita no código da página,
+          então qualquer pessoa consegue lê-la. Configure o banco de dados
+          (arquivo <b>config.js</b>) para ter uma senha de verdade.
+        </div>
       </div>
     `;
     return;
@@ -1938,9 +2206,12 @@ function loginAdmin(){
   }
 }
 
-function logoutAdmin(){
+async function logoutAdmin(){
   adminLogado = false;
   localStorage.removeItem('lv_sessao_admin');
+  if(bancoAtivo){
+    try{ await bd.auth.signOut(); }catch(e){ console.warn('[banco] sair', e); }
+  }
   renderizarAdmin();
   if(document.getElementById('secao-pedidos').classList.contains('ativa')) renderizarPedidos();
   mostrarToast('Você saiu da administração.');
@@ -2025,6 +2296,7 @@ async function salvarProduto(){
   fotoSelecionada = null;
   fotoRemovida = false;
   salvar('lv_produtos', produtos);
+  await bdSalvarProduto(produtoSalvo);
   fecharModal('overlayProduto');
   renderizarSubAbaAdmin();
   renderizarLoja();
@@ -2040,6 +2312,7 @@ function excluirProduto(id){
     function(){
       produtos = produtos.filter(p => p.id !== id);
       salvar('lv_produtos', produtos);
+      bdExcluirProduto(id);
       apagarImagemGuardada(prod.imagemId);
       atualizarTelas();
       mostrarToast('Produto excluído.');
@@ -2058,6 +2331,7 @@ function iniciar(){
   conectarArmazemFotos();
   conectarPublicador();
   carregarCatalogoDoArquivo();
+  conectarBanco();
 }
 iniciar();
 </script>
