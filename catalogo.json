@@ -1,9 +1,35 @@
 {
   "produtos": [
-    {"id": 1, "nome": "Tênis Esportivo", "descricao": "Confortável para o dia a dia", "preco": 249.9, "estoque": 12, "emoji": "👟", "imagem": "", "imagemId": ""},
-    {"id": 2, "nome": "Mochila Urbana", "descricao": "Resistente e com vários bolsos", "preco": 159.9, "estoque": 8, "emoji": "🎒", "imagem": "", "imagemId": ""},
-    {"id": 3, "nome": "Fone Bluetooth", "descricao": "Som de alta qualidade sem fio", "preco": 129.9, "estoque": 5, "emoji": "🎧", "imagem": "", "imagemId": ""},
-    {"id": 4, "nome": "Relógio Digital", "descricao": "À prova d'água, vários modos", "preco": 89.9, "estoque": 20, "emoji": "⌚", "imagem": "", "imagemId": ""}
+    {
+      "id": 1790188511378,
+      "nome": "celular do ze",
+      "descricao": "",
+      "preco": 1500,
+      "estoque": 99,
+      "emoji": "📦",
+      "imagem": "",
+      "imagemId": ""
+    },
+    {
+      "id": 1790188539090,
+      "nome": "coisas erradas",
+      "descricao": "lula ladrao roubou meu coracao",
+      "preco": 13,
+      "estoque": 11,
+      "emoji": "📦",
+      "imagem": "",
+      "imagemId": ""
+    },
+    {
+      "id": 1790188562412,
+      "nome": "pc da chicoski",
+      "descricao": "",
+      "preco": 7499.99,
+      "estoque": 51,
+      "emoji": "📦",
+      "imagem": "",
+      "imagemId": ""
+    }
   ],
-  "atualizadoEm": "2026-09-23T00:00:00.000Z"
+  "atualizadoEm": "2026-09-23T18:36:01.857Z"
 }

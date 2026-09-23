@@ -544,7 +544,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script type="application/json" id="dadosLoja">{"produtos":[]}</script>
+<script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular do ze","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188539090,"nome":"coisas erradas","descricao":"lula ladrao roubou meu coracao","preco":13,"estoque":11,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188562412,"nome":"pc da chicoski","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":""}],"publicadoEm":"2026-09-23T18:36:01.857Z"}</script>
 
 <script>
 /* Retrato da página exatamente como ela foi publicada, tirado ANTES de
@@ -835,11 +835,22 @@ async function conectarPublicador(){
   }
 }
 
+/* A plataforma embrulha a página num cabeçalho próprio. Se republicássemos
+   o embrulho junto, ele se empilharia a cada salvamento — então cortamos
+   fora tudo que está antes do nosso <!DOCTYPE html> e depois do </html>. */
+function limparEnvelope(texto){
+  const inicio = texto.indexOf('<!DOCTYPE html>');
+  if(inicio < 0) return texto;
+  const fim = texto.indexOf('<\/html>', inicio);
+  return fim < 0 ? texto.slice(inicio) : texto.slice(inicio, fim + 7);
+}
+
 function montarPaginaComCatalogo(){
   const marcador = /<script[^>]*id="dadosLoja"[^>]*>[\s\S]*?<\/script>/;
-  if(!marcador.test(fontePagina)) return null;
+  const fonte = limparEnvelope(fontePagina);
+  if(!marcador.test(fonte)) return null;
   const json = JSON.stringify({produtos, publicadoEm:new Date().toISOString()}).replace(/</g, '\\u003c');
-  return fontePagina.replace(marcador,
+  return fonte.replace(marcador,
     () => '<script type="application/json" id="dadosLoja">' + json + '<\/script>');
 }
 
