@@ -12,17 +12,17 @@
     },
     {
       "id": 1790188539090,
-      "nome": "coisas erradas",
-      "descricao": "lula ladrao roubou meu coracao",
+      "nome": "coisas",
+      "descricao": "",
       "preco": 13,
-      "estoque": 11,
+      "estoque": 22,
       "emoji": "📦",
       "imagem": "",
       "imagemId": ""
     },
     {
       "id": 1790188562412,
-      "nome": "pc da chicoski",
+      "nome": "PC",
       "descricao": "",
       "preco": 7499.99,
       "estoque": 51,
@@ -31,5 +31,5 @@
       "imagemId": ""
     }
   ],
-  "atualizadoEm": "2026-09-23T18:46:27.702Z"
+  "atualizadoEm": "2026-09-23T18:57:06.998Z"
 }
