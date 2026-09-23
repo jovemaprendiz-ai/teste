@@ -97,6 +97,18 @@
     display:flex;align-items:center;justify-content:center;
     font-size:48px;
   }
+  .card-produto .imagem img{width:100%;height:100%;object-fit:cover;display:block;}
+  .miniatura{width:42px;height:42px;border-radius:8px;object-fit:cover;display:block;}
+  .mini-item{width:34px;height:34px;border-radius:7px;object-fit:cover;display:block;}
+  .foto-campo{display:flex;gap:14px;align-items:flex-start;}
+  .foto-preview{
+    width:96px;height:96px;border-radius:10px;border:1.5px dashed var(--cinza-borda);
+    background:var(--cinza-fundo);display:flex;align-items:center;justify-content:center;
+    overflow:hidden;flex-shrink:0;font-size:12px;color:var(--cinza-texto);text-align:center;
+  }
+  .foto-preview img{width:100%;height:100%;object-fit:cover;display:block;}
+  .foto-acoes{display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
+  .foto-dica{font-size:12px;color:var(--cinza-texto);line-height:1.4;}
   .card-produto .info{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1;}
   .card-produto .nome{font-weight:700;font-size:15px;}
   .card-produto .desc{font-size:12.5px;color:var(--cinza-texto);flex:1;}
@@ -466,7 +478,21 @@
       </div>
     </div>
     <div class="campo">
-      <label>Emoji / ícone do produto</label>
+      <label>Foto do produto</label>
+      <div class="foto-campo">
+        <div class="foto-preview" id="fotoPreview">Sem foto</div>
+        <div class="foto-acoes">
+          <label class="btn btn-secundario btn-sm" style="display:inline-block;">
+            📷 Escolher foto
+            <input type="file" id="produtoFoto" accept="image/*" style="display:none;" onchange="selecionarFoto(this)">
+          </label>
+          <button type="button" class="btn btn-perigo btn-sm" id="btnRemoverFoto" onclick="removerFotoSelecionada()" style="display:none;">Remover foto</button>
+          <div class="foto-dica">A imagem é reduzida automaticamente<br>para a loja carregar rápido.</div>
+        </div>
+      </div>
+    </div>
+    <div class="campo">
+      <label>Emoji (usado quando o produto não tem foto)</label>
       <input type="text" id="produtoEmoji" placeholder="Ex: 👟" maxlength="4">
     </div>
     <button class="btn btn-primario btn-full" onclick="salvarProduto()">Salvar produto</button>
@@ -511,7 +537,12 @@ function carregar(chave, padrao){
   }catch(e){ return padrao; }
 }
 function salvar(chave, valor){
-  localStorage.setItem(chave, JSON.stringify(valor));
+  try{
+    localStorage.setItem(chave, JSON.stringify(valor));
+  }catch(e){
+    console.warn('[armazenamento local]', e);
+    mostrarToast('A memória deste navegador encheu (fotos ocupam espaço).');
+  }
 }
 
 /* ==================== NUVEM (banco compartilhado do artefato) ====================
@@ -814,6 +845,172 @@ function sairCliente(){
   mostrarToast('Você saiu da sua conta.');
 }
 
+
+/* ==================== FOTOS DOS PRODUTOS ====================
+   A foto escolhida é reduzida no próprio navegador antes de ser guardada.
+   Quando o artefato tem armazenamento de arquivos, ela sobe para lá e todo
+   mundo enxerga a mesma imagem; senão fica embutida no próprio produto. */
+const FOTO_LADO_MAX = 900;
+const FOTO_BYTES_ALVO = 170000;
+let armazemFotos = null;
+let fotoSelecionada = null;   // Blob já comprimido, esperando o "Salvar produto"
+let fotoRemovida = false;
+let urlPreviewAtual = null;
+
+async function conectarArmazemFotos(){
+  if(typeof window.claude === 'undefined' || !window.claude.use) return;
+  try{ armazemFotos = await window.claude.use('assets'); }
+  catch(e){ armazemFotos = null; }
+}
+
+function lerArquivoComoImagem(arquivo){
+  return new Promise((ok, erro) => {
+    const url = URL.createObjectURL(arquivo);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); ok(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); erro(new Error('imagem inválida')); };
+    img.src = url;
+  });
+}
+
+function desenharEmEscala(img, lado){
+  const escala = Math.min(1, lado / Math.max(img.width, img.height));
+  const tela = document.createElement('canvas');
+  tela.width = Math.max(1, Math.round(img.width * escala));
+  tela.height = Math.max(1, Math.round(img.height * escala));
+  const ctx = tela.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, tela.width, tela.height);
+  ctx.drawImage(img, 0, 0, tela.width, tela.height);
+  return tela;
+}
+
+function telaParaBlob(tela, qualidade){
+  return new Promise(ok => {
+    if(tela.toBlob){ tela.toBlob(b => ok(b), 'image/jpeg', qualidade); return; }
+    try{
+      const partes = atob(tela.toDataURL('image/jpeg', qualidade).split(',')[1]);
+      const bytes = new Uint8Array(partes.length);
+      for(let i=0;i<partes.length;i++) bytes[i] = partes.charCodeAt(i);
+      ok(new Blob([bytes], {type:'image/jpeg'}));
+    }catch(e){ ok(null); }
+  });
+}
+
+async function comprimirImagem(arquivo){
+  const img = await lerArquivoComoImagem(arquivo);
+  let lado = FOTO_LADO_MAX, qualidade = 0.78, blob = null;
+  for(let tentativa = 0; tentativa < 6; tentativa++){
+    blob = await telaParaBlob(desenharEmEscala(img, lado), qualidade);
+    if(!blob) return null;
+    if(blob.size <= FOTO_BYTES_ALVO) break;
+    if(qualidade > 0.5) qualidade -= 0.12; else lado = Math.round(lado * 0.75);
+  }
+  return blob;
+}
+
+function blobParaDataUrl(blob){
+  return new Promise((ok, erro) => {
+    const leitor = new FileReader();
+    leitor.onload = () => ok(leitor.result);
+    leitor.onerror = () => erro(leitor.error);
+    leitor.readAsDataURL(blob);
+  });
+}
+
+/* Devolve {imagem, imagemId} para gravar no produto */
+async function guardarImagem(blob){
+  if(armazemFotos){
+    try{
+      const envio = await armazemFotos.upload(blob, {type:'image/jpeg'});
+      return {imagem:'', imagemId: envio.id};
+    }catch(e){
+      console.warn('[fotos] upload falhou, guardando na própria página', e);
+      if(e && e.code === 'too_large') mostrarToast('Essa foto ficou grande demais. Tente outra.');
+    }
+  }
+  return {imagem: await blobParaDataUrl(blob), imagemId: ''};
+}
+
+async function apagarImagemGuardada(idAsset){
+  if(!idAsset || !armazemFotos) return;
+  try{ await armazemFotos.delete(idAsset); }
+  catch(e){ console.warn('[fotos] não consegui apagar a imagem antiga', e); }
+}
+
+function fonteImagem(p){
+  if(p && p.imagemId) return '/_blob/' + p.imagemId;
+  if(p && p.imagem) return p.imagem;
+  return '';
+}
+function escaparAtributo(valor){
+  return String(valor).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+function blocoImagem(p){
+  const src = fonteImagem(p);
+  return src
+    ? `<img src="${escaparAtributo(src)}" alt="${escaparAtributo(p.nome)}">`
+    : (p.emoji || '📦');
+}
+function miniaturaProduto(p, classe){
+  const src = fonteImagem(p);
+  return src
+    ? `<img class="${classe}" src="${escaparAtributo(src)}" alt="${escaparAtributo(p.nome)}">`
+    : `<span style="font-size:20px;">${p.emoji || '📦'}</span>`;
+}
+
+async function selecionarFoto(input){
+  const arquivo = input.files && input.files[0];
+  input.value = '';
+  if(!arquivo) return;
+  if(arquivo.type && arquivo.type.indexOf('image/') !== 0){
+    mostrarToast('Escolha um arquivo de imagem.');
+    return;
+  }
+  mostrarToast('Preparando a foto…');
+  try{
+    const blob = await comprimirImagem(arquivo);
+    if(!blob) throw new Error('falha ao comprimir');
+    fotoSelecionada = blob;
+    fotoRemovida = false;
+    trocarPreviewFoto(URL.createObjectURL(blob), true);
+  }catch(e){
+    console.warn('[fotos]', e);
+    mostrarToast('Não consegui ler essa imagem. Tente outra.');
+  }
+}
+
+function removerFotoSelecionada(){
+  fotoSelecionada = null;
+  fotoRemovida = true;
+  trocarPreviewFoto('', false);
+}
+
+function trocarPreviewFoto(src, ehObjectUrl){
+  const caixa = document.getElementById('fotoPreview');
+  const botao = document.getElementById('btnRemoverFoto');
+  if(!caixa || !botao) return;
+  if(urlPreviewAtual){ URL.revokeObjectURL(urlPreviewAtual); urlPreviewAtual = null; }
+  if(src){
+    caixa.innerHTML = '';
+    const img = document.createElement('img');
+    img.alt = 'Pré-visualização do produto';
+    img.src = src;
+    caixa.appendChild(img);
+    botao.style.display = 'inline-block';
+    if(ehObjectUrl) urlPreviewAtual = src;
+  }else{
+    caixa.textContent = 'Sem foto';
+    botao.style.display = 'none';
+  }
+}
+
+function prepararCamposFoto(produto){
+  fotoSelecionada = null;
+  fotoRemovida = false;
+  trocarPreviewFoto(produto ? fonteImagem(produto) : '', false);
+}
+
 /* ==================== LOJA / PRODUTOS ==================== */
 function renderizarLoja(){
   const grid = document.getElementById('gridProdutos');
@@ -828,7 +1025,7 @@ function renderizarLoja(){
     else if(p.estoque <= 3){ estoqueClasse='baixo'; estoqueTxt=`Últimas ${p.estoque} unidades`; }
     return `
       <div class="card-produto">
-        <div class="imagem">${p.emoji || '📦'}</div>
+        <div class="imagem">${blocoImagem(p)}</div>
         <div class="info">
           <div class="nome">${escapeHtml(p.nome)}</div>
           <div class="desc">${escapeHtml(p.descricao || '')}</div>
@@ -896,7 +1093,7 @@ function renderizarCarrinhoModal(){
     return `
       <div class="item-carrinho">
         <div class="info-item">
-          <div class="nome-item">${produto.emoji || ''} ${escapeHtml(produto.nome)}</div>
+          <div class="nome-item" style="display:flex;align-items:center;gap:8px;">${miniaturaProduto(produto, 'mini-item')}<span>${escapeHtml(produto.nome)}</span></div>
           <div class="preco-item">${formatarPreco(produto.preco)} un.</div>
         </div>
         <div class="qtd-control">
@@ -1316,7 +1513,7 @@ function renderizarSubAbaAdmin(){
           <tbody>
             ${produtos.map(p => `
               <tr>
-                <td style="font-size:20px;">${p.emoji || '📦'}</td>
+                <td>${miniaturaProduto(p, 'miniatura')}</td>
                 <td>${escapeHtml(p.nome)}</td>
                 <td>${formatarPreco(p.preco)}</td>
                 <td>${p.estoque}</td>
@@ -1419,6 +1616,7 @@ function abrirModalNovoProduto(){
   document.getElementById('produtoPreco').value = '';
   document.getElementById('produtoEstoque').value = '';
   document.getElementById('produtoEmoji').value = '';
+  prepararCamposFoto(null);
   limparErros();
   abrirModal('overlayProduto');
 }
@@ -1433,11 +1631,12 @@ function editarProduto(id){
   document.getElementById('produtoPreco').value = p.preco;
   document.getElementById('produtoEstoque').value = p.estoque;
   document.getElementById('produtoEmoji').value = p.emoji || '';
+  prepararCamposFoto(p);
   limparErros();
   abrirModal('overlayProduto');
 }
 
-function salvarProduto(){
+async function salvarProduto(){
   const id = document.getElementById('produtoId').value;
   const nome = document.getElementById('produtoNome').value.trim();
   const descricao = document.getElementById('produtoDesc').value.trim();
@@ -1450,18 +1649,36 @@ function salvarProduto(){
     return;
   }
 
+  // resolve a foto antes de mexer no produto
+  let dadosFoto = null;
+  if(fotoSelecionada){
+    mostrarToast('Guardando a foto\u2026');
+    dadosFoto = await guardarImagem(fotoSelecionada);
+  }else if(fotoRemovida){
+    dadosFoto = {imagem:'', imagemId:''};
+  }
+
   let produtoSalvo;
+  let idFotoAntiga = '';
   if(id){
     produtoSalvo = produtos.find(pr => String(pr.id) === String(id));
     if(!produtoSalvo) return;
+    idFotoAntiga = produtoSalvo.imagemId || '';
     produtoSalvo.nome = nome; produtoSalvo.descricao = descricao;
     produtoSalvo.preco = preco; produtoSalvo.estoque = estoque; produtoSalvo.emoji = emoji;
     mostrarToast('Produto atualizado com sucesso!');
   }else{
-    produtoSalvo = {id: gerarId(), nome, descricao, preco, estoque, emoji};
+    produtoSalvo = {id: gerarId(), nome, descricao, preco, estoque, emoji, imagem:'', imagemId:''};
     produtos.push(produtoSalvo);
     mostrarToast('Produto cadastrado com sucesso!');
   }
+  if(dadosFoto){
+    produtoSalvo.imagem = dadosFoto.imagem;
+    produtoSalvo.imagemId = dadosFoto.imagemId;
+    if(idFotoAntiga && idFotoAntiga !== dadosFoto.imagemId) apagarImagemGuardada(idFotoAntiga);
+  }
+  fotoSelecionada = null;
+  fotoRemovida = false;
   salvar('lv_produtos', produtos);
   salvarNaNuvem(COL.produtos, produtoSalvo);
   fecharModal('overlayProduto');
@@ -1479,6 +1696,7 @@ function excluirProduto(id){
       produtos = produtos.filter(p => p.id !== id);
       salvar('lv_produtos', produtos);
       removerDaNuvem(COL.produtos, id);
+      apagarImagemGuardada(prod.imagemId);
       atualizarTelas();
       mostrarToast('Produto excluído.');
     },
@@ -1492,6 +1710,7 @@ function iniciar(){
   renderizarAreaConta();
   renderizarLoja();
   atualizarBadgeCarrinho();
+  conectarArmazemFotos();
   conectarNuvem();
 }
 iniciar();
