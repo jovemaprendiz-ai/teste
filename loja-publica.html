@@ -521,6 +521,27 @@
   </div>
 </div>
 
+<!-- MODAL PEDIDO REGISTRADO / WHATSAPP -->
+<div class="overlay" id="overlayPedidoOk">
+  <div class="modal" style="max-width:430px;">
+    <button class="fechar-modal" onclick="fecharModal('overlayPedidoOk')">✕</button>
+    <div style="font-size:42px;text-align:center;margin-bottom:6px;">✅</div>
+    <h2 style="text-align:center;">Pedido registrado!</h2>
+    <div class="sub" id="numeroPedidoOk" style="text-align:center;"></div>
+    <a id="linkWhatsapp" href="#" target="_blank" rel="noopener"
+       style="background:#25D366;color:#fff;display:block;text-align:center;text-decoration:none;
+              padding:13px;border-radius:8px;font-weight:700;font-size:15px;">
+      📲 Enviar pedido no WhatsApp
+    </a>
+    <div style="font-size:12.5px;color:var(--cinza-texto);line-height:1.5;margin-top:12px;text-align:center;">
+      É assim que a loja recebe seu pedido na hora.<br>
+      Se o WhatsApp não abrir sozinho, copie a mensagem e mande para
+      <b style="color:var(--preto);">(45) 99132-1583</b>.
+    </div>
+    <button class="btn btn-secundario btn-full" style="margin-top:10px;" onclick="copiarMensagemPedido()">📋 Copiar mensagem</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script type="application/json" id="dadosLoja">{"produtos":[]}</script>
@@ -1226,7 +1247,7 @@ function confirmarPagamento(){
 
   fecharModal('overlayPagamento');
   renderizarLoja();
-  mostrarToast('Pedido ' + novoPedido.numero + ' registrado! Aguardando confirmação do pagamento. ⏳');
+  abrirConfirmacaoPedido(novoPedido);
 
   // limpa formulário de cartão
   document.getElementById('cartaoNumero').value = '';
@@ -1235,6 +1256,53 @@ function confirmarPagamento(){
   document.getElementById('pagCep').value = '';
   document.querySelector('input[name="tipoRecebimento"][value="entrega"]').checked = true;
   atualizarTipoRecebimento();
+}
+
+
+/* ==================== PEDIDO PELO WHATSAPP ====================
+   Sem servidor, o caminho do pedido até a loja é o WhatsApp: montamos a
+   mensagem pronta e o cliente só confirma o envio. */
+const WHATSAPP_LOJA = '5545991321583';
+let mensagemPedidoAtual = '';
+
+function montarMensagemPedido(ped){
+  const partes = [];
+  partes.push('Ol\u00e1! Acabei de fazer um pedido na loja 🛍️');
+  partes.push('');
+  partes.push('*Pedido:* ' + ped.numero);
+  partes.push('*Cliente:* ' + ped.clienteNome);
+  partes.push('*E-mail:* ' + ped.clienteEmail);
+  partes.push('*Recebimento:* ' + (ped.tipoRecebimento === 'retirada'
+    ? 'Retirada no local'
+    : 'Entrega \u2014 CEP ' + (ped.clienteCep || 'n\u00e3o informado')));
+  partes.push('*Pagamento:* ' + rotuloMetodo(ped.metodoPagamento));
+  partes.push('');
+  partes.push('*Itens:*');
+  ped.itens.forEach(i => {
+    partes.push('\u2022 ' + i.qtd + 'x ' + i.nome + ' \u2014 ' + formatarPreco(i.preco * i.qtd));
+  });
+  partes.push('');
+  partes.push('*Total: ' + formatarPreco(ped.total) + '*');
+  return partes.join('\n');
+}
+
+function abrirConfirmacaoPedido(ped){
+  mensagemPedidoAtual = montarMensagemPedido(ped);
+  document.getElementById('numeroPedidoOk').textContent =
+    ped.numero + ' \u00b7 ' + formatarPreco(ped.total);
+  document.getElementById('linkWhatsapp').href =
+    'https://wa.me/' + WHATSAPP_LOJA + '?text=' + encodeURIComponent(mensagemPedidoAtual);
+  abrirModal('overlayPedidoOk');
+}
+
+function copiarMensagemPedido(){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(mensagemPedidoAtual)
+      .then(() => mostrarToast('Mensagem copiada! 📋'))
+      .catch(() => mostrarToast('N\u00e3o consegui copiar por aqui.'));
+  }else{
+    mostrarToast('N\u00e3o consegui copiar neste navegador.');
+  }
 }
 
 /* ==================== MEUS PEDIDOS ==================== */
