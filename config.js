@@ -20,6 +20,6 @@
    ============================================================================ */
 
 window.LOJA_CONFIG = {
-  supabaseUrl: '',
+  supabaseUrl: 'https://blaypwcojloqgrucfrfj.supabase.co',
   supabaseAnonKey: ''
 };
