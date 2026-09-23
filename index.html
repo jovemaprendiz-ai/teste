@@ -109,6 +109,26 @@
   .foto-preview img{width:100%;height:100%;object-fit:cover;display:block;}
   .foto-acoes{display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
   .foto-dica{font-size:12px;color:var(--cinza-texto);line-height:1.4;}
+  .lista-catalogos{display:flex;flex-wrap:wrap;gap:8px;}
+  .lista-catalogos label{
+    display:flex;align-items:center;gap:7px;border:1.5px solid var(--cinza-borda);
+    border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;background:#fff;
+  }
+  .lista-catalogos label:has(input:checked){
+    border-color:var(--vermelho);background:#fdeaea;color:var(--vermelho);font-weight:600;
+  }
+  .lista-catalogos .aviso{font-size:12.5px;color:var(--cinza-texto);line-height:1.5;}
+  .filtros-catalogo{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;}
+  .filtros-catalogo button{
+    border:1.5px solid var(--cinza-borda);background:#fff;border-radius:20px;
+    padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;color:var(--cinza-texto);
+  }
+  .filtros-catalogo button:hover{border-color:var(--vermelho);color:var(--vermelho);}
+  .filtros-catalogo button.ativo{border-color:var(--vermelho);background:var(--vermelho);color:#fff;}
+  .etiqueta-catalogo{
+    display:inline-block;background:#f1f2f4;color:var(--cinza-texto);border-radius:20px;
+    padding:3px 9px;font-size:11.5px;font-weight:600;margin:2px 4px 2px 0;
+  }
   .card-produto .info{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1;}
   .card-produto .nome{font-weight:700;font-size:15px;}
   .card-produto .desc{font-size:12.5px;color:var(--cinza-texto);flex:1;}
@@ -293,6 +313,7 @@
     <div class="loja-topo">
       <h1>Produtos</h1>
     </div>
+    <div class="filtros-catalogo" id="filtrosCatalogo"></div>
     <div class="grid-produtos" id="gridProdutos"></div>
   </section>
 
@@ -492,6 +513,10 @@
       </div>
     </div>
     <div class="campo">
+      <label>Catálogos deste produto</label>
+      <div class="lista-catalogos" id="catalogosProduto"></div>
+    </div>
+    <div class="campo">
       <label>Emoji (usado quando o produto não tem foto)</label>
       <input type="text" id="produtoEmoji" placeholder="Ex: 👟" maxlength="4">
     </div>
@@ -542,9 +567,26 @@
   </div>
 </div>
 
+<!-- MODAL CATÁLOGO (admin) -->
+<div class="overlay" id="overlayCatalogo">
+  <div class="modal" style="max-width:400px;">
+    <button class="fechar-modal" onclick="fecharModal('overlayCatalogo')">✕</button>
+    <h2 id="tituloModalCatalogo">Novo catálogo</h2>
+    <div class="sub">Catálogos agrupam produtos na loja — por exemplo Eletrônicos, Promoções, Usados</div>
+    <div class="erro-msg" id="erroCatalogo"></div>
+    <input type="hidden" id="catalogoId">
+    <div class="campo">
+      <label>Nome do catálogo</label>
+      <input type="text" id="catalogoNome" placeholder="Ex: Eletrônicos" maxlength="40"
+             onkeydown="if(event.key==='Enter') salvarCatalogo()">
+    </div>
+    <button class="btn btn-primario btn-full" onclick="salvarCatalogo()">Salvar catálogo</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
-<script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188539090,"nome":"coisas erradas","descricao":"lula ladrao roubou meu coracao","preco":13,"estoque":11,"emoji":"📦","imagem":"","imagemId":""},{"id":1790188562412,"nome":"pc da chicoski","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":""}],"publicadoEm":"2026-09-23T18:46:27.702Z"}</script>
+<script type="application/json" id="dadosLoja">{"produtos":[{"id":1790188511378,"nome":"celular","descricao":"","preco":1500,"estoque":99,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]},{"id":1790188539090,"nome":"coisas","descricao":"","preco":13,"estoque":22,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]},{"id":1790188562412,"nome":"PC","descricao":"","preco":7499.99,"estoque":51,"emoji":"📦","imagem":"","imagemId":"","catalogos":[]}],"catalogos":[],"publicadoEm":"2026-09-23T18:52:04.169Z"}</script>
 
 <script>
 /* Retrato da página exatamente como ela foi publicada, tirado ANTES de
@@ -583,6 +625,15 @@ function lerCatalogoPublicado(){
   }catch(e){ return null; }
 }
 
+function lerCatalogosPublicados(){
+  try{
+    const el = document.getElementById('dadosLoja');
+    if(!el) return null;
+    const dados = JSON.parse(el.textContent || '{}');
+    return Array.isArray(dados.catalogos) ? dados.catalogos : null;
+  }catch(e){ return null; }
+}
+
 let produtos = lerCatalogoPublicado() || carregar('lv_produtos', null);
 if(!produtos){
   produtos = [
@@ -593,6 +644,11 @@ if(!produtos){
   ];
 }
 salvar('lv_produtos', produtos);
+
+/* Catálogos são as seções da loja; cada produto guarda em quais ele aparece. */
+let catalogos = lerCatalogosPublicados() || carregar('lv_catalogos', []) || [];
+salvar('lv_catalogos', catalogos);
+let catalogoAtivo = 'todos';
 
 let pedidos = carregar('lv_pedidos', []);
 let historicoCancelamentos = carregar('lv_historico_cancelamentos', []);
@@ -792,17 +848,21 @@ async function carregarCatalogoDoArquivo(){
     const resposta = await fetch('catalogo.json', {cache:'no-store'});
     if(!resposta.ok) return;
     const dados = await resposta.json();
+    if(Array.isArray(dados.catalogos)){
+      catalogos = dados.catalogos;
+      salvar('lv_catalogos', catalogos);
+    }
     if(Array.isArray(dados.produtos) && dados.produtos.length){
       produtos = dados.produtos;
       salvar('lv_produtos', produtos);
-      renderizarLoja();
-      renderizarSubAbaAdmin();
     }
+    renderizarLoja();
+    renderizarSubAbaAdmin();
   }catch(e){ console.warn('[catálogo] sem catalogo.json, usando o embutido', e); }
 }
 
 function exportarCatalogo(){
-  const json = JSON.stringify({produtos, atualizadoEm:new Date().toISOString()}, null, 2);
+  const json = JSON.stringify({produtos, catalogos, atualizadoEm:new Date().toISOString()}, null, 2);
   const url = URL.createObjectURL(new Blob([json], {type:'application/json'}));
   const link = document.createElement('a');
   link.href = url;
@@ -857,7 +917,7 @@ function montarPaginaComCatalogo(){
   /* Confere que a fonte continua inteira: um corte errado já deixou a loja
      publicada pela metade uma vez, e isso não pode voltar a acontecer. */
   if(fonte.length < 30000 || fonte.indexOf('iniciar();') < 0) return null;
-  const json = JSON.stringify({produtos, publicadoEm:new Date().toISOString()}).replace(/</g, '\\u003c');
+  const json = JSON.stringify({produtos, catalogos, publicadoEm:new Date().toISOString()}).replace(/</g, '\\u003c');
   return fonte.replace(marcador,
     () => '<script type="application/json" id="dadosLoja">' + json + '<\/script>');
 }
@@ -1058,14 +1118,166 @@ function prepararCamposFoto(produto){
   trocarPreviewFoto(produto ? fonteImagem(produto) : '', false);
 }
 
+/* ==================== CATÁLOGOS ====================
+   Um catálogo é uma seção da loja. O produto guarda os ids dos catálogos
+   em que aparece, então um produto pode estar em mais de um. */
+function nomeCatalogo(id){
+  const c = catalogos.find(c => String(c.id) === String(id));
+  return c ? c.nome : '';
+}
+function catalogosDoProduto(p){
+  return Array.isArray(p.catalogos) ? p.catalogos : [];
+}
+function contarProdutosNoCatalogo(id){
+  return produtos.filter(p => catalogosDoProduto(p).some(c => String(c) === String(id))).length;
+}
+
+function abrirModalNovoCatalogo(){
+  document.getElementById('tituloModalCatalogo').textContent = 'Novo catálogo';
+  document.getElementById('catalogoId').value = '';
+  document.getElementById('catalogoNome').value = '';
+  limparErros();
+  abrirModal('overlayCatalogo');
+  setTimeout(() => document.getElementById('catalogoNome').focus(), 50);
+}
+
+function renomearCatalogo(id){
+  const c = catalogos.find(c => String(c.id) === String(id));
+  if(!c) return;
+  document.getElementById('tituloModalCatalogo').textContent = 'Renomear catálogo';
+  document.getElementById('catalogoId').value = c.id;
+  document.getElementById('catalogoNome').value = c.nome;
+  limparErros();
+  abrirModal('overlayCatalogo');
+  setTimeout(() => document.getElementById('catalogoNome').select(), 50);
+}
+
+function salvarCatalogo(){
+  const id = document.getElementById('catalogoId').value;
+  const nome = document.getElementById('catalogoNome').value.trim();
+  if(!nome){
+    mostrarErro('erroCatalogo', 'Dê um nome ao catálogo.');
+    return;
+  }
+  const repetido = catalogos.some(c =>
+    c.nome.toLowerCase() === nome.toLowerCase() && String(c.id) !== String(id));
+  if(repetido){
+    mostrarErro('erroCatalogo', 'Já existe um catálogo com esse nome.');
+    return;
+  }
+  if(id){
+    const c = catalogos.find(c => String(c.id) === String(id));
+    if(!c) return;
+    c.nome = nome;
+    mostrarToast('Catálogo renomeado!');
+  }else{
+    catalogos.push({id: gerarId(), nome});
+    mostrarToast('Catálogo criado!');
+  }
+  salvar('lv_catalogos', catalogos);
+  fecharModal('overlayCatalogo');
+  atualizarTelas();
+  publicarCatalogo();
+}
+
+function excluirCatalogo(id){
+  const c = catalogos.find(c => String(c.id) === String(id));
+  if(!c) return;
+  const quantos = contarProdutosNoCatalogo(id);
+  pedirConfirmacao(
+    'Excluir catálogo',
+    `Excluir o catálogo "${c.nome}"? ` + (quantos
+      ? `Os ${quantos} produto(s) dele continuam na loja, apenas sem esse catálogo.`
+      : 'Nenhum produto usa esse catálogo.'),
+    function(){
+      catalogos = catalogos.filter(c => String(c.id) !== String(id));
+      produtos.forEach(p => {
+        if(Array.isArray(p.catalogos)){
+          p.catalogos = p.catalogos.filter(x => String(x) !== String(id));
+        }
+      });
+      if(String(catalogoAtivo) === String(id)) catalogoAtivo = 'todos';
+      salvar('lv_catalogos', catalogos);
+      salvar('lv_produtos', produtos);
+      atualizarTelas();
+      mostrarToast('Catálogo excluído.');
+      publicarCatalogo();
+    },
+    'Sim, excluir',
+    '🗑️'
+  );
+}
+
+/* Caixinhas de seleção dentro do modal do produto */
+function montarEscolhaDeCatalogos(produto){
+  const caixa = document.getElementById('catalogosProduto');
+  if(!caixa) return;
+  if(catalogos.length === 0){
+    caixa.innerHTML = `<div class="aviso">Nenhum catálogo criado ainda.<br>
+      Crie um na aba <b>🏷️ Catálogos</b> para poder marcar aqui.</div>`;
+    return;
+  }
+  const marcados = produto ? catalogosDoProduto(produto).map(String) : [];
+  caixa.innerHTML = catalogos.map(c => `
+    <label>
+      <input type="checkbox" value="${escaparAtributo(c.id)}"
+        ${marcados.indexOf(String(c.id)) >= 0 ? 'checked' : ''}>
+      <span>${escapeHtml(c.nome)}</span>
+    </label>
+  `).join('');
+}
+
+function lerCatalogosMarcados(){
+  const caixa = document.getElementById('catalogosProduto');
+  if(!caixa) return [];
+  return Array.from(caixa.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(el => el.value);
+}
+
+/* Barra de filtros da vitrine */
+function renderizarFiltrosCatalogo(){
+  const barra = document.getElementById('filtrosCatalogo');
+  if(!barra) return;
+  if(catalogos.length === 0){
+    barra.innerHTML = '';
+    return;
+  }
+  if(catalogoAtivo !== 'todos' && !catalogos.some(c => String(c.id) === String(catalogoAtivo))){
+    catalogoAtivo = 'todos';
+  }
+  const botoes = [`<button class="${catalogoAtivo === 'todos' ? 'ativo' : ''}"
+      onclick="filtrarPorCatalogo('todos')">Todos</button>`];
+  catalogos.forEach(c => {
+    botoes.push(`<button class="${String(catalogoAtivo) === String(c.id) ? 'ativo' : ''}"
+      onclick="filtrarPorCatalogo('${escaparAtributo(c.id)}')">${escapeHtml(c.nome)}</button>`);
+  });
+  barra.innerHTML = botoes.join('');
+}
+
+function filtrarPorCatalogo(id){
+  catalogoAtivo = id;
+  renderizarLoja();
+}
+
+function produtosVisiveis(){
+  if(catalogoAtivo === 'todos') return produtos;
+  return produtos.filter(p =>
+    catalogosDoProduto(p).some(c => String(c) === String(catalogoAtivo)));
+}
+
 /* ==================== LOJA / PRODUTOS ==================== */
 function renderizarLoja(){
   const grid = document.getElementById('gridProdutos');
-  if(produtos.length === 0){
-    grid.innerHTML = `<div class="vazio" style="grid-column:1/-1;"><div class="emoji">📦</div>Nenhum produto cadastrado ainda.</div>`;
+  renderizarFiltrosCatalogo();
+  const lista = produtosVisiveis();
+  if(lista.length === 0){
+    const recado = produtos.length === 0
+      ? 'Nenhum produto cadastrado ainda.'
+      : 'Nenhum produto neste catálogo ainda.';
+    grid.innerHTML = `<div class="vazio" style="grid-column:1/-1;"><div class="emoji">📦</div>${recado}</div>`;
     return;
   }
-  grid.innerHTML = produtos.map(p => {
+  grid.innerHTML = lista.map(p => {
     let estoqueClasse = '';
     let estoqueTxt = `${p.estoque} em estoque`;
     if(p.estoque === 0){ estoqueClasse='zero'; estoqueTxt='Fora de estoque'; }
@@ -1570,6 +1782,7 @@ function renderizarAdmin(){
     </div>
     <div class="admin-abas">
       <button class="${abaAdminAtiva==='produtos'?'ativo':''}" onclick="mudarAbaAdmin('produtos')">📦 Produtos</button>
+      <button class="${abaAdminAtiva==='catalogos'?'ativo':''}" onclick="mudarAbaAdmin('catalogos')">🏷️ Catálogos</button>
       <button class="${abaAdminAtiva==='pedidos'?'ativo':''}" onclick="mudarAbaAdmin('pedidos')">📋 Pedidos</button>
       <button class="${abaAdminAtiva==='contas'?'ativo':''}" onclick="mudarAbaAdmin('contas')">👥 Contas cadastradas</button>
       <button class="${abaAdminAtiva==='historico'?'ativo':''}" onclick="mudarAbaAdmin('historico')">🗑️ Histórico de cancelamentos</button>
@@ -1602,12 +1815,15 @@ function renderizarSubAbaAdmin(){
       </div>
       <div class="tabela-wrap">
         <table>
-          <thead><tr><th></th><th>Nome</th><th>Preço</th><th>Estoque</th><th>Ações</th></tr></thead>
+          <thead><tr><th></th><th>Nome</th><th>Catálogos</th><th>Preço</th><th>Estoque</th><th>Ações</th></tr></thead>
           <tbody>
             ${produtos.map(p => `
               <tr>
                 <td>${miniaturaProduto(p, 'miniatura')}</td>
                 <td>${escapeHtml(p.nome)}</td>
+                <td>${catalogosDoProduto(p).length
+                  ? catalogosDoProduto(p).map(id => `<span class="etiqueta-catalogo">${escapeHtml(nomeCatalogo(id))}</span>`).join('')
+                  : '<span style="color:var(--cinza-texto);">—</span>'}</td>
                 <td>${formatarPreco(p.preco)}</td>
                 <td>${p.estoque}</td>
                 <td class="acoes-tabela">
@@ -1615,10 +1831,40 @@ function renderizarSubAbaAdmin(){
                   <button class="btn btn-perigo btn-sm" onclick="excluirProduto(${p.id})">Excluir</button>
                 </td>
               </tr>
-            `).join('') || `<tr><td colspan="5" style="text-align:center;color:var(--cinza-texto);">Nenhum produto cadastrado.</td></tr>`}
+            `).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--cinza-texto);">Nenhum produto cadastrado.</td></tr>`}
           </tbody>
         </table>
       </div>
+    `;
+  } else if(abaAdminAtiva === 'catalogos'){
+    cont.innerHTML = `
+      <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div style="font-size:13px;color:var(--cinza-texto);max-width:520px;line-height:1.5;">
+          Catálogos são as seções da sua loja. Depois de criar, escolha os catálogos
+          de cada produto no botão <b>Editar</b> da aba 📦 Produtos.
+        </div>
+        <button class="btn btn-primario" onclick="abrirModalNovoCatalogo()">+ Novo catálogo</button>
+      </div>
+      ${catalogos.length === 0 ? `
+        <div class="vazio"><div class="emoji">🏷️</div>Nenhum catálogo criado ainda.</div>
+      ` : `
+      <div class="tabela-wrap">
+        <table>
+          <thead><tr><th>Catálogo</th><th>Produtos</th><th>Ações</th></tr></thead>
+          <tbody>
+            ${catalogos.map(c => `
+              <tr>
+                <td><b>${escapeHtml(c.nome)}</b></td>
+                <td>${contarProdutosNoCatalogo(c.id)}</td>
+                <td class="acoes-tabela">
+                  <button class="btn btn-outline btn-sm" onclick="renomearCatalogo('${escaparAtributo(c.id)}')">Renomear</button>
+                  <button class="btn btn-perigo btn-sm" onclick="excluirCatalogo('${escaparAtributo(c.id)}')">Excluir</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`}
     `;
   } else if(abaAdminAtiva === 'pedidos'){
     if(pedidos.length === 0){
@@ -1709,6 +1955,7 @@ function abrirModalNovoProduto(){
   document.getElementById('produtoPreco').value = '';
   document.getElementById('produtoEstoque').value = '';
   document.getElementById('produtoEmoji').value = '';
+  montarEscolhaDeCatalogos(null);
   prepararCamposFoto(null);
   limparErros();
   abrirModal('overlayProduto');
@@ -1724,6 +1971,7 @@ function editarProduto(id){
   document.getElementById('produtoPreco').value = p.preco;
   document.getElementById('produtoEstoque').value = p.estoque;
   document.getElementById('produtoEmoji').value = p.emoji || '';
+  montarEscolhaDeCatalogos(p);
   prepararCamposFoto(p);
   limparErros();
   abrirModal('overlayProduto');
@@ -1751,6 +1999,8 @@ async function salvarProduto(){
     dadosFoto = {imagem:'', imagemId:''};
   }
 
+  const catalogosEscolhidos = lerCatalogosMarcados();
+
   let produtoSalvo;
   let idFotoAntiga = '';
   if(id){
@@ -1759,9 +2009,11 @@ async function salvarProduto(){
     idFotoAntiga = produtoSalvo.imagemId || '';
     produtoSalvo.nome = nome; produtoSalvo.descricao = descricao;
     produtoSalvo.preco = preco; produtoSalvo.estoque = estoque; produtoSalvo.emoji = emoji;
+    produtoSalvo.catalogos = catalogosEscolhidos;
     mostrarToast('Produto atualizado com sucesso!');
   }else{
-    produtoSalvo = {id: gerarId(), nome, descricao, preco, estoque, emoji, imagem:'', imagemId:''};
+    produtoSalvo = {id: gerarId(), nome, descricao, preco, estoque, emoji,
+                    catalogos: catalogosEscolhidos, imagem:'', imagemId:''};
     produtos.push(produtoSalvo);
     mostrarToast('Produto cadastrado com sucesso!');
   }

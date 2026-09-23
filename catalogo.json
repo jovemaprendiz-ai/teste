@@ -8,7 +8,8 @@
       "estoque": 99,
       "emoji": "📦",
       "imagem": "",
-      "imagemId": ""
+      "imagemId": "",
+      "catalogos": []
     },
     {
       "id": 1790188539090,
@@ -18,7 +19,8 @@
       "estoque": 22,
       "emoji": "📦",
       "imagem": "",
-      "imagemId": ""
+      "imagemId": "",
+      "catalogos": []
     },
     {
       "id": 1790188562412,
@@ -28,8 +30,10 @@
       "estoque": 51,
       "emoji": "📦",
       "imagem": "",
-      "imagemId": ""
+      "imagemId": "",
+      "catalogos": []
     }
   ],
-  "atualizadoEm": "2026-09-23T18:57:06.998Z"
+  "catalogos": [],
+  "atualizadoEm": "2026-09-23T18:52:04.169Z"
 }
